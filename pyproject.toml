@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aibackup"
+version = "0.1.0"
+description = "Backup, restore and migrate coding agent sessions across Windows, Linux and macOS"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+aibackup = "aibackup.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

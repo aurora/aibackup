@@ -3,8 +3,9 @@ from aibackup.adapters.claude_code import ClaudeCode
 from aibackup.adapters.codex import Codex
 from aibackup.adapters.command_code import CommandCode
 from aibackup.adapters.opencode import OpenCode
+from aibackup.adapters.roo import RooCode, ZooCode
 from aibackup.adapters.zed import Zed
 
-ADAPTERS: dict[str, Adapter] = {a.id: a for a in (ClaudeCode(), Codex(), CommandCode(), OpenCode(), Zed())}
+ADAPTERS: dict[str, Adapter] = {a.id: a for a in (ClaudeCode(), Codex(), CommandCode(), OpenCode(), Zed(), ZooCode(), RooCode())}
 
 __all__ = ["ADAPTERS", "CATEGORIES", "DEFAULT_CATEGORIES", "Adapter", "Root"]

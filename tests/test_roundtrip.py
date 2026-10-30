@@ -275,6 +275,27 @@ class RoundTripTest(unittest.TestCase):
         # Build output inside an existing repo or worktree is noise; a vanished worktree is not.
         self.assertEqual(list(missing), ["/home/h/source/proj/.claude/worktrees/wt"])
 
+    def test_claude_json_project_keys_are_mapped(self):
+        write(
+            self.win / ".claude.json",
+            {
+                "primaryApiKey": "SECRET",
+                "projects": {
+                    PROJ: {"hasTrustDialogAccepted": True},
+                    "C:/Users/h/source/proj": {"allowedTools": []},
+                    "/elsewhere": {},
+                },
+            },
+        )
+        self.backup(include={"data", "config", "secret"})
+        lin = self.tmp / "lin"
+        self.restore(Env("linux", lin, "/home/h", {}), maps=[(WIN_HOME + "\\source", "/home/h/code")])
+        projects = json.loads((lin / ".claude.json").read_text(encoding="utf-8"))["projects"]
+        self.assertEqual(
+            projects,
+            {"/home/h/code/proj": {"hasTrustDialogAccepted": True, "allowedTools": []}, "/elsewhere": {}},
+        )
+
     def test_same_platform_restore_is_byte_identical(self):
         self.backup()
         target = self.tmp / "win2"

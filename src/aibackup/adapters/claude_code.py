@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 
 from aibackup.adapters.base import Adapter, Root, merge_jsonl, rewrite_jsonl, rules
@@ -93,6 +94,8 @@ class ClaudeCode(Adapter):
         return encode_project_dir(rule.dst).rstrip("-") + name[len(enc):]
 
     def rewrite_file(self, root: str, rel: str, data: bytes, mapper: PathMapper) -> bytes | None:
+        if rel == ".claude.json":
+            return self._rewrite_project_keys(data, mapper)
         if root != "config":
             return None
         if rel.startswith("projects/") and rel.endswith(".jsonl"):
@@ -100,6 +103,30 @@ class ClaudeCode(Adapter):
         if rel == "history.jsonl":
             return rewrite_jsonl(data, (("project",),), mapper)
         return None
+
+    @staticmethod
+    def _rewrite_project_keys(data: bytes, mapper: PathMapper) -> bytes | None:
+        """``projects`` in .claude.json is keyed by project path (trust, allowed tools, ...)."""
+        try:
+            obj = json.loads(data)
+        except ValueError:
+            return None
+        projects = obj.get("projects") if isinstance(obj, dict) else None
+        if not isinstance(projects, dict):
+            return None
+        mapped: dict = {}
+        for key, value in projects.items():
+            new_key = mapper.map(key)
+            if new_key in mapped:
+                # Windows has both C:\x and C:/x variants; they collapse into one key.
+                if isinstance(value, dict) and isinstance(mapped[new_key], dict):
+                    mapped[new_key] = {**value, **mapped[new_key]}
+            else:
+                mapped[new_key] = value
+        if list(mapped) == list(projects):
+            return None
+        obj["projects"] = mapped
+        return json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
 
     def merge(self, root: str, rel: str, existing: bytes, incoming: bytes) -> bytes | None:
         if root == "config" and rel == "history.jsonl":

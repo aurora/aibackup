@@ -92,7 +92,7 @@ When restoring onto another operating system, the `cache` category is skipped
 because it holds platform-specific binaries.
 
 Only the fields an agent uses to link sessions to projects are rewritten (e.g.
-Claude Code project directories and `cwd`, OpenCode `session.directory`, Zed
+Claude Code project directories, `cwd` and `projects` in `~/.claude.json`, OpenCode `session.directory`, Zed
 `folder_paths`, Zoo/Roo `workspace`). Paths inside the chat history stay unchanged.
 
 An agent running in WSL (e.g. Command Code) can be backed up from Windows by

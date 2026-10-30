@@ -10,8 +10,8 @@ from pathlib import Path
 
 from aibackup.adapters import ADAPTERS, Adapter
 from aibackup.archive import CHUNK, ArchiveReader, safe_rel
-from aibackup.env import Env
-from aibackup.pathmap import PathMapper
+from aibackup.env import Env, join
+from aibackup.pathmap import PathMapper, clean
 from aibackup.progress import NullProgress, Progress
 from aibackup.sqlite_snapshot import SIDECAR_SUFFIXES
 
@@ -27,6 +27,8 @@ class AgentReport:
     errors: list[str] = field(default_factory=list)
     rewritten: int = 0
     mapper: PathMapper | None = None
+    # Missing target folder -> (corresponding source path, names of subfolders sessions refer to)
+    missing: dict[str, tuple[str, set[str]]] = field(default_factory=dict)
 
 
 def build_mapper(adapter: Adapter, env: Env, manifest: dict, explicit: list[tuple[str, str]]) -> PathMapper:
@@ -40,6 +42,51 @@ def build_mapper(adapter: Adapter, env: Env, manifest: dict, explicit: list[tupl
             mapper.add(src, env.logical(targets[name].path))
     mapper.add(manifest["source"]["home"], env.home_path)
     return mapper
+
+
+def find_missing(mapper: PathMapper, env: Env, skip_dsts: set[str]) -> dict[str, tuple[str, set[str]]]:
+    """Project folders that mapped paths point to but that don't exist on the target.
+
+    Agents attach sessions to these paths, so sessions of a missing folder are
+    invisible. Only the topmost missing folder of each path is reported, and
+    nothing inside an existing repository (e.g. build output or old worktrees).
+    """
+    cache: dict[str, bool] = {}
+
+    def exists(logical: str) -> bool:
+        if logical not in cache:
+            local = env.local(logical)
+            cache[logical] = local is None or local.exists()
+        return cache[logical]
+
+    def in_repo(rule, rest: tuple[str, ...]) -> bool:
+        return any(exists(join(rule.dst, rest[:j] + (".git",), mapper.dst_os)) for j in range(1, len(rest)))
+
+    missing: dict[str, tuple[str, set[str]]] = {}
+    for rule, rest in mapper.used:
+        if rule.dst in skip_dsts:
+            continue  # paths inside the agent's own data directories
+        for k in range(len(rest) + 1):
+            dst = join(rule.dst, rest[:k], mapper.dst_os)
+            if not exists(dst):
+                if in_repo(rule, rest[:k]) and not _missing_worktree(rest, k):
+                    break
+                src, children = missing.setdefault(dst, (join(rule.src, rest[:k], mapper.src_os), set()))
+                if k < len(rest):
+                    children.add(rest[k])
+                break
+    return missing
+
+
+def _missing_worktree(parts: tuple[str, ...], k: int) -> bool:
+    """Whether ``parts[:k]`` is (an ancestor of) a Claude Code session worktree.
+
+    These live in ``<repo>/.claude/worktrees/<name>`` and are projects of their own.
+    """
+    for i in range(len(parts) - 2):
+        if parts[i : i + 2] == (".claude", "worktrees"):
+            return k <= i + 3
+    return False
 
 
 def _sha_file(path: Path) -> str:
@@ -127,6 +174,10 @@ class Restorer:
             if status == "conflict":
                 report.conflicts.append(str(target))
             self.log.debug(f"  {status:<11} {target}")
+        if rewrite:
+            data_dsts = {clean(self.env.logical(r.path), self.env.os) for r in roots.values()}
+            data_dsts.discard(clean(self.env.home_path, self.env.os))
+            report.missing = find_missing(mapper, self.env, data_dsts)
         return report
 
     def _restore_small(self, adapter, agent_id, entry, root, rel, target, mapper, rewrite, report) -> str:

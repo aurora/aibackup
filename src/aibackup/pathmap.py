@@ -48,6 +48,8 @@ class PathMapper:
         self.src_os = src_os
         self.dst_os = dst_os
         self.rules: list[Rule] = []
+        # Every non-identity mapping that was applied, as (rule, remaining components).
+        self.used: set[tuple[Rule, tuple[str, ...]]] = set()
         for src, dst in rules:
             self.add(src, dst)
 
@@ -84,6 +86,7 @@ class PathMapper:
         if found is None or found[0].identity:
             return path
         rule, rest = found
+        self.used.add((rule, tuple(rest)))
         return join(rule.dst, rest, self.dst_os)
 
 

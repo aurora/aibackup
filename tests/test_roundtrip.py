@@ -234,6 +234,35 @@ class RoundTripTest(unittest.TestCase):
         for agent, report in again.items():
             self.assertEqual(set(report.counts), {"unchanged"}, agent)
 
+    def test_reports_missing_project_folders(self):
+        self.backup()
+        lin = self.tmp / "lin"
+        env = Env("linux", lin, "/home/h", {})
+        reports = self.restore(env)
+        for agent in ("claude-code", "codex", "opencode", "zed", "zoo"):
+            self.assertEqual(reports[agent].missing, {"/home/h/source": (WIN_HOME + "\\source", {"proj"})}, agent)
+
+        lin2 = self.tmp / "lin2"
+        (lin2 / "code/proj/.git").mkdir(parents=True)
+        env2 = Env("linux", lin2, "/home/h", {})
+        reports = self.restore(env2, maps=[(WIN_HOME + "\\source", "/home/h/code")])
+        for agent, report in reports.items():
+            self.assertEqual(report.missing, {}, agent)
+
+    def test_missing_folders_inside_repos(self):
+        sessions = self.win / ".claude/projects/C--Users-h-source-proj"
+        write(sessions / "s2.jsonl", jsonl({"type": "user", "cwd": PROJ + "\\bin\\Debug"}))
+        worktree = PROJ + "\\.claude\\worktrees\\wt"
+        write(sessions.with_name("C--Users-h-source-proj--claude-worktrees-wt") / "s3.jsonl", jsonl({"type": "user", "cwd": worktree}))
+        write(sessions.with_name("C--Users-h-source-proj--claude-worktrees-ok") / "s4.jsonl", jsonl({"type": "user", "cwd": PROJ + "\\.claude\\worktrees\\ok\\src"}))
+        self.backup()
+        lin = self.tmp / "lin"
+        (lin / "source/proj/.git").mkdir(parents=True)
+        (lin / "source/proj/.claude/worktrees/ok").mkdir(parents=True)
+        missing = self.restore(Env("linux", lin, "/home/h", {}))["claude-code"].missing
+        # Build output inside an existing repo or worktree is noise; a vanished worktree is not.
+        self.assertEqual(list(missing), ["/home/h/source/proj/.claude/worktrees/wt"])
+
     def test_same_platform_restore_is_byte_identical(self):
         self.backup()
         target = self.tmp / "win2"

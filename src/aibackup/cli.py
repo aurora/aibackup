@@ -192,8 +192,13 @@ def cmd_restore(args, log: Log) -> int:
     started = time.monotonic()
     log.progress.begin(sum(f["size"] for a in agents for f in reader.files(a)))
     failed = conflicts = False
+    missing: dict[str, tuple[str, set[str], set[str]]] = {}
     for agent_id in agents:
         report = restorer.restore_agent(agent_id, explicit)
+        for dst, (src_path, children) in report.missing.items():
+            entry = missing.setdefault(dst, (src_path, set(), set()))
+            entry[1].update(children)
+            entry[2].add(agent_id)
         counts = ", ".join(f"{n} {s}" for s, n in sorted(report.counts.items()))
         log.info(f"{agent_id}: {counts or 'nothing to do'}" + (f"; paths rewritten in {report.rewritten} files" if report.rewritten else ""))
         if report.mapper and not report.mapper.is_identity:
@@ -210,9 +215,28 @@ def cmd_restore(args, log: Log) -> int:
         failed |= bool(report.errors or (report.conflicts and not args.dry_run))
     if conflicts:
         log.info("Existing files that differ were kept; rerun with --overwrite to replace them (originals are kept as *.bak).")
+    if missing:
+        _report_missing(missing, log)
     log.info(f"Done in {duration(time.monotonic() - started)}")
     reader.close()
     return 1 if failed else 0
+
+
+def _report_missing(missing: dict[str, tuple[str, set[str], set[str]]], log: Log, limit: int = 15) -> None:
+    log.warn(
+        f"sessions refer to {len(missing)} project folder(s) that do not exist on this system; "
+        "agents only show sessions of existing project folders:"
+    )
+    items = sorted(missing.items(), key=lambda kv: (-len(kv[1][1]), kv[0].lower()))
+    shown = items if log.verbose else items[:limit]
+    for dst, (src_path, children, agent_ids) in shown:
+        names = sorted(children, key=str.lower)
+        inside = f", e.g. {', '.join(names[:4])}{', ...' if len(names) > 4 else ''}" if names else ""
+        log.info(f"  {dst}  <- {src_path}  [{', '.join(sorted(agent_ids))}{inside}]")
+    if len(shown) < len(items):
+        log.info(f"  ... and {len(items) - len(shown)} more (use -v to list all)")
+    example = items[0][1][0]
+    log.info(f"If the projects live elsewhere, rerun with --map-path, e.g. --map-path '{example}=/path/to/projects'.")
 
 
 # Parser -----------------------------------------------------------------------

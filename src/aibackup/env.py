@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,6 +70,18 @@ class Env:
         except ValueError:
             return str(path)
         return join(self.home_path, rel.parts, self.os)
+
+    def local(self, logical: str) -> Path | None:
+        """Inverse of :meth:`logical`; ``None`` if the path is not reachable from here."""
+        if self.home_path == str(self.home):
+            return Path(logical)
+        base = self.home_path.rstrip("/\\")
+        a, b = (logical.lower(), base.lower()) if self.os == "windows" else (logical, base)
+        if a == b:
+            return self.home
+        if a.startswith(b) and a[len(b)] in "/\\":
+            return self.home.joinpath(*[p for p in re.split(r"[/\\]", logical[len(b):]) if p])
+        return None
 
     def var_path(self, name: str, default_rel: str) -> Path:
         value = self.vars.get(name)

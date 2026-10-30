@@ -84,6 +84,10 @@ automatically. If projects live elsewhere on the target, specify that with
 aibackup restore sessions.zip --map-path 'C:\Users\me\source=/home/me/code'
 ```
 
+Agents only show the sessions of the project that is currently open. If mapped
+sessions point to folders that don't exist on the target, `restore` warns and names
+the source path to pass to `--map-path`, so check with `--dry-run` first.
+
 Only the fields an agent uses to link sessions to projects are rewritten (e.g.
 Claude Code project directories and `cwd`, OpenCode `session.directory`, Zed
 `folder_paths`, Zoo/Roo `workspace`). Paths inside the chat history stay unchanged.

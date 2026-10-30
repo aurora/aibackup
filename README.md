@@ -88,6 +88,9 @@ Agents only show the sessions of the project that is currently open. If mapped
 sessions point to folders that don't exist on the target, `restore` warns and names
 the source path to pass to `--map-path`, so check with `--dry-run` first.
 
+When restoring onto another operating system, the `cache` category is skipped
+because it holds platform-specific binaries.
+
 Only the fields an agent uses to link sessions to projects are rewritten (e.g.
 Claude Code project directories and `cwd`, OpenCode `session.directory`, Zed
 `folder_paths`, Zoo/Roo `workspace`). Paths inside the chat history stay unchanged.

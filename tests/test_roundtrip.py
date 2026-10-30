@@ -234,6 +234,18 @@ class RoundTripTest(unittest.TestCase):
         for agent, report in again.items():
             self.assertEqual(set(report.counts), {"unchanged"}, agent)
 
+    def test_cache_is_not_restored_across_platforms(self):
+        self.backup(include={"data", "config", "cache"})
+        lin = self.tmp / "lin"
+        reports = self.restore(Env("linux", lin, "/home/h", {}))
+        self.assertFalse((lin / ".local/share/zed/node/node.exe").exists())
+        self.assertGreater(reports["zed"].counts["skipped (cache)"], 0)
+        self.assertTrue((lin / ".local/share/zed/threads/threads.db").exists())
+
+        win2 = self.tmp / "win2"
+        self.restore(Env("windows", win2, WIN_HOME, {}))
+        self.assertTrue((win2 / "AppData/Local/Zed/node/node.exe").exists())
+
     def test_reports_missing_project_folders(self):
         self.backup()
         lin = self.tmp / "lin"

@@ -143,8 +143,14 @@ class Restorer:
         report.mapper = mapper
         rewrite = not mapper.is_identity
         roots = {r.name: r for r in adapter.roots(self.env)}
+        # Caches hold platform-specific binaries (runtimes, language servers).
+        skip_cache = self.reader.manifest["source"]["os"] != self.env.os
 
         for entry in self.reader.files(agent_id):
+            if skip_cache and entry["category"] == "cache":
+                report.counts["skipped (cache)"] += 1
+                self.progress.advance(entry["size"])
+                continue
             label = f"{entry['root']}/{entry['path']}"
             root = roots.get(entry["root"])
             if root is None or not safe_rel(entry["path"]):

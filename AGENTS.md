@@ -38,6 +38,8 @@ src/aibackup/
 ├── restore.py          # restores archives (quick check, conflicts, merge, rewrite)
 ├── archive.py          # ZIP container, manifest, verification
 ├── sqlite_snapshot.py  # consistent SQLite snapshots and column rewriting
+├── chromium_leveldb.py # minimal LevelDB reader/appender for Chromium's Local Storage
+├── desktop_index.py    # rebuilds Claude Desktop's session list from transcripts
 ├── progress.py         # progress line and formatting helpers
 └── adapters/           # one module per agent, registered in adapters/__init__.py
 tests/                  # unittest, synthetic data only

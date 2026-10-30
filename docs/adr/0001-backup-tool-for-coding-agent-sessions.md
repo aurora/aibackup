@@ -111,7 +111,7 @@ serve to rewind within a session.
 
 | Adapter | Data roots |
 |---|---|
-| `claude-code` | `~/.claude/` (or `$CLAUDE_CONFIG_DIR`), `~/.claude.json` |
+| `claude-code` | `~/.claude/` (or `$CLAUDE_CONFIG_DIR`), `~/.claude.json`; Claude Desktop's user data dir (Windows `%APPDATA%\Claude` or the Microsoft Store package dir, Linux `~/.config/Claude`, macOS `~/Library/Application Support/Claude`): `claude-code-sessions/`, `local-agent-mode-sessions/`, `Local Storage/`, `IndexedDB/` as `data`, `claude_desktop_config.json` as `secret`, everything else as `cache` |
 | `codex` | `~/.codex/` (or `$CODEX_HOME`) |
 | `command-code` | `~/.commandcode/`; when it runs in WSL, the WSL home is addressed via `--home`/`--platform linux`/`--home-path` |
 | `opencode` | `$XDG_DATA_HOME/opencode`, `$XDG_CONFIG_HOME/opencode` (default `~/.local/share`, `~/.config`, on every OS) |
@@ -179,14 +179,22 @@ message contents (tool calls, outputs) stay unchanged; they are history.
 
 | Adapter | Rewritten |
 |---|---|
-| `claude-code` | directory names under `projects/` (encoding based on the mapped path), top-level `cwd` in session JSONL, `project` in `history.jsonl` |
+| `claude-code` | directory names under `projects/` (encoding based on the mapped path), top-level `cwd` in session JSONL, `project` in `history.jsonl`, project keys in `~/.claude.json` (trust); every absolute path in Desktop's session records (many version-dependent fields) |
 | `command-code` | directory names under `projects/` (slug based on the mapped path), `cwd` in the session header line |
 | `codex` | `cwd` in rollouts; `threads.cwd`, `threads.rollout_path`, `local_thread_catalog.cwd`, `automation_runs.source_cwd` |
 | `opencode` | `project.worktree`, `session.directory`, `project_directory.directory`, `workspace.directory`; `directory`/`worktree` in `storage/` |
 | `zed` | `threads.folder_paths` (not: zstd-compressed `data` blobs) |
 | `zoo`, `roo` | `workspace` in `history_item.json`/`_index.json`; `worktree` in the checkpoint Git config |
 
-Deliberately not rewritten: project keys in `~/.claude.json`, Codex `config.toml`.
+Deliberately not rewritten: Codex `config.toml`.
+
+After restoring, sessions whose mapped project folder does not exist on the target
+are reported together with the source path, because agents only list sessions of
+existing folders. Folders inside an existing Git repository (build output) are not
+reported, except vanished Claude Code worktrees (`.claude/worktrees/<name>`).
+
+The `cache` category is not restored onto another OS: it holds platform-specific
+binaries.
 
 ### 7. Safe restore
 
@@ -201,6 +209,17 @@ Deliberately not rewritten: project keys in `~/.claude.json`, Codex `config.toml
 - Files are replaced atomically (`os.replace`) and mtimes are restored (agents sort
   sessions by them).
 - Archive paths are validated (no `..`, no absolute paths).
+- Directories that are only consistent as a whole (LevelDB databases: Claude Desktop's
+  `Local Storage`, `IndexedDB`) are never mixed with archived files. If one exists, the
+  archived copy goes to `<dir>.aibackup-<timestamp>` and the adapter may merge from it:
+  Claude Desktop's sidebar groups and the assignment of local sessions to them
+  (Local Storage key `dframe-store`, not synced to the account) are added to the
+  existing database by appending a write batch to its log (`chromium_leveldb.py`,
+  standard library only). This requires Claude Desktop to be quit; it is checked via
+  the database lock.
+- `aibackup desktop-index` rebuilds Claude Desktop's session list from Claude Code
+  transcripts for archives without it, writing the same records as Desktop's own
+  "Import Claude Code CLI Sessions".
 - `--home`, `--platform` and `--home-path` redirect the target, e.g. directly into a
   WSL home: `--home '\\wsl$\Ubuntu\home\me' --platform linux --home-path /home/me`.
 
@@ -212,6 +231,7 @@ aibackup backup  [-a AGENTS] [-o FILE|-] [--include checkpoint,secret,cache|all]
 aibackup inspect FILE [--files]
 aibackup verify  FILE
 aibackup restore FILE [-a AGENTS] [--map-path FROM=TO]… [--dry-run] [--overwrite] [--checksum]
+aibackup desktop-index [--dry-run] [--org ORG]
 ```
 
 Backup and restore show a progress line when stderr is a terminal.
@@ -235,6 +255,9 @@ Installation via `pipx install .` / `uv tool install .` or as a `zipapp` (`aibac
   migrated session differently (e.g. Zed, if paths inside the `data` blob matter).
 - **Zoo/Roo task history:** whether newer versions build the list from
   `tasks/_index.json` alone or also need the global state in `state.vscdb` is unverified.
+- **Claude Desktop internals:** the session record format and the sidebar state in
+  Local Storage are internal to the app and its claude.ai page; both may change with
+  any update.
 - **No incremental backups** in v1.
 - **Python must be installed.**
 

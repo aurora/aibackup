@@ -209,6 +209,8 @@ def cmd_restore(args, log: Log) -> int:
             log.info(f"  conflict: {c}")
         if len(report.conflicts) > 10:
             log.info(f"  ... and {len(report.conflicts) - 10} more")
+        for note in report.notes:
+            log.info(f"  {note}")
         for e in report.errors:
             log.info(f"  error: {e}")
         conflicts |= bool(report.conflicts)

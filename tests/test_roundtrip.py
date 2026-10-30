@@ -78,6 +78,12 @@ class RoundTripTest(unittest.TestCase):
         write(h / ".claude/file-history/s1/abc@v1", "old file content")
         write(h / ".claude/debug/log.txt", "debug")
         write(h / ".claude.json", {"primaryApiKey": "SECRET"})
+        write(
+            h / "AppData/Roaming/Claude/claude-code-sessions/acct/org/local_1.json",
+            {"sessionId": "local_1", "cliSessionId": "s1", "cwd": PROJ, "title": f"{PROJ} is not a path here\n",
+             "worktreeLazy": {"path": PROJ + "\\.claude\\worktrees\\x"}, "additionalDirectories": ["D:\\other"]},
+        )
+        write(h / "AppData/Roaming/Claude/Cache/data_0", "electron cache")
 
         # Codex: database in WAL mode with an open connection and uncheckpointed data
         write(h / ".codex/auth.json", {"token": "SECRET"})
@@ -204,6 +210,12 @@ class RoundTripTest(unittest.TestCase):
         self.assertIn(PROJ, first["message"]["content"])
         history = json.loads((lin / ".claude/history.jsonl").read_text(encoding="utf-8"))
         self.assertEqual(history["project"], "/home/h/code/proj")
+        record = json.loads((lin / ".config/Claude/claude-code-sessions/acct/org/local_1.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["cwd"], "/home/h/code/proj")
+        self.assertEqual(record["worktreeLazy"]["path"], "/home/h/code/proj/.claude/worktrees/x")
+        self.assertEqual(record["additionalDirectories"], ["D:\\other"])
+        self.assertTrue(record["title"].startswith(PROJ))
+        self.assertFalse((lin / ".config/Claude/Cache").exists())
 
         # Codex: rollout + database (including path into the data root)
         rollout = lin / ".codex/sessions/2026/10/27/rollout-1.jsonl"
@@ -246,6 +258,37 @@ class RoundTripTest(unittest.TestCase):
         self.restore(Env("windows", win2, WIN_HOME, {}))
         self.assertTrue((win2 / "AppData/Local/Zed/node/node.exe").exists())
 
+    def test_desktop_sidebar_groups_are_merged_into_existing_local_storage(self):
+        from aibackup import chromium_leveldb as ldb
+
+        key = ldb.local_storage_key("https://claude.ai", "dframe-store")
+
+        def store(groups, assignments):
+            state = {"customGroupsByScope": {"acct/org": {"groups": groups, "assignments": assignments, "order": {}}}}
+            return ldb.encode_local_storage(json.dumps({"state": state, "version": 1}))
+
+        def make_db(path, value):
+            path.mkdir(parents=True)
+            (path / "000003.log").write_bytes(b"")
+            ldb.put(path, {key: value})
+
+        src_db = self.win / "AppData/Roaming/Claude/Local Storage/leveldb"
+        make_db(src_db, store([{"id": "g1", "name": "Alpha"}], {"code:local_s1": "g1"}))
+        self.backup()
+
+        lin = self.tmp / "lin"
+        live = lin / ".config/Claude/Local Storage/leveldb"
+        make_db(live, store([{"id": "g1", "name": "Alpha"}], {"code:session_cloud": "g1"}))
+        report = self.restore(Env("linux", lin, "/home/h", {}))["claude-code"]
+        self.assertEqual(report.errors, [])
+        self.assertTrue(any("merged 1 sidebar" in n for n in report.notes), report.notes)
+
+        state, _ = ldb.load(live)
+        merged = json.loads(ldb.decode_local_storage(state[key]))["state"]["customGroupsByScope"]["acct/org"]
+        self.assertEqual(merged["assignments"], {"code:session_cloud": "g1", "code:local_s1": "g1"})
+        # The live database was only appended to; the archived copy sits next to it.
+        self.assertEqual(len(list(live.parent.glob("leveldb.aibackup-*"))), 1)
+
     def test_reports_missing_project_folders(self):
         self.backup()
         lin = self.tmp / "lin"
@@ -256,6 +299,7 @@ class RoundTripTest(unittest.TestCase):
 
         lin2 = self.tmp / "lin2"
         (lin2 / "code/proj/.git").mkdir(parents=True)
+        (lin2 / "code/proj/.claude/worktrees/x").mkdir(parents=True)
         env2 = Env("linux", lin2, "/home/h", {})
         reports = self.restore(env2, maps=[(WIN_HOME + "\\source", "/home/h/code")])
         for agent, report in reports.items():
@@ -271,6 +315,7 @@ class RoundTripTest(unittest.TestCase):
         lin = self.tmp / "lin"
         (lin / "source/proj/.git").mkdir(parents=True)
         (lin / "source/proj/.claude/worktrees/ok").mkdir(parents=True)
+        (lin / "source/proj/.claude/worktrees/x").mkdir(parents=True)
         missing = self.restore(Env("linux", lin, "/home/h", {}))["claude-code"].missing
         # Build output inside an existing repo or worktree is noise; a vanished worktree is not.
         self.assertEqual(list(missing), ["/home/h/source/proj/.claude/worktrees/wt"])

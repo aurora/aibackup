@@ -4,7 +4,7 @@ Backs up the sessions of local coding agents into a ZIP archive and restores the
 optionally onto another operating system (Windows ⇄ Linux ⇄ macOS).
 Requires only Python ≥ 3.10, no other packages.
 
-Supported: Claude Code, Codex CLI, Command Code, OpenCode, Zed Agent, Zoo Code, Roo Code
+Supported: Claude Code (including Claude Desktop's session list), Codex CLI, Command Code, OpenCode, Zed Agent, Zoo Code, Roo Code
 (in VS Code, VS Code Insiders, VSCodium, Cursor, Windsurf).
 Background and design decisions: [ADR 0001](docs/adr/0001-backup-tool-for-coding-agent-sessions.md).
 
@@ -92,8 +92,8 @@ When restoring onto another operating system, the `cache` category is skipped
 because it holds platform-specific binaries.
 
 Only the fields an agent uses to link sessions to projects are rewritten (e.g.
-Claude Code project directories, `cwd` and `projects` in `~/.claude.json`, OpenCode `session.directory`, Zed
-`folder_paths`, Zoo/Roo `workspace`). Paths inside the chat history stay unchanged.
+Claude Code project directories, `cwd` and `projects` in `~/.claude.json`, OpenCode
+`session.directory`, Zed `folder_paths`, Zoo/Roo `workspace`). Paths inside the chat history stay unchanged.
 
 An agent running in WSL (e.g. Command Code) can be backed up from Windows by
 pointing to the WSL home:
@@ -107,6 +107,15 @@ Restore directly into a WSL home:
 ```sh
 aibackup restore sessions.zip --home '\\wsl$\Ubuntu\home\me' --platform linux --home-path /home/me
 ```
+
+### Claude Desktop
+
+From Claude Desktop, its list of Code sessions (`claude-code-sessions`), local chats
+(`local-agent-mode-sessions`) and the storage of its page (`Local Storage`, `IndexedDB`)
+are backed up. The latter records which local session belongs to which sidebar group;
+claude.ai does not sync that. These databases are only restored as a whole: if one
+already exists on the target, the archived copy is put next to it (`*.aibackup-<time>`)
+and the sidebar groups are merged into the existing database. Quit Claude Desktop first.
 
 ### Conflicts
 

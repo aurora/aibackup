@@ -29,6 +29,7 @@ class AgentReport:
     mapper: PathMapper | None = None
     # Missing target folder -> (corresponding source path, names of subfolders sessions refer to)
     missing: dict[str, tuple[str, set[str]]] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
 
 
 def build_mapper(adapter: Adapter, env: Env, manifest: dict, explicit: list[tuple[str, str]]) -> PathMapper:
@@ -145,6 +146,8 @@ class Restorer:
         roots = {r.name: r for r in adapter.roots(self.env)}
         # Caches hold platform-specific binaries (runtimes, language servers).
         skip_cache = self.reader.manifest["source"]["os"] != self.env.os
+        # Atomic dir "root/rel" -> (existing dir, where the archived copy goes instead) or None.
+        redirects: dict[str, tuple[Path, Path] | None] = {}
 
         for entry in self.reader.files(agent_id):
             if skip_cache and entry["category"] == "cache":
@@ -165,6 +168,14 @@ class Restorer:
             target = root.path.joinpath(*rel.split("/"))
             self.progress.set_label(f"{agent_id}: {rel}", force=entry["size"] > LARGE_FILE or entry["kind"] == "sqlite")
             self._streamed = 0
+            atomic = adapter.atomic_dir(root.name, rel)
+            if atomic is not None:
+                key = f"{root.name}/{atomic}"
+                if key not in redirects:
+                    live = root.path.joinpath(*atomic.split("/"))
+                    redirects[key] = (live, live.with_name(f"{live.name}.aibackup-{self.stamp}")) if live.exists() else None
+                if redirects[key] is not None:
+                    target = redirects[key][1].joinpath(*rel[len(atomic) + 1 :].split("/"))
             try:
                 if self._quick_unchanged(target, entry, rewrite):
                     status = "unchanged"
@@ -180,6 +191,12 @@ class Restorer:
             if status == "conflict":
                 report.conflicts.append(str(target))
             self.log.debug(f"  {status:<11} {target}")
+        sidelined = dict(v for v in redirects.values() if v is not None)
+        if sidelined:
+            try:
+                report.notes += adapter.after_restore(sidelined, self.dry_run)
+            except Exception as e:  # noqa: BLE001
+                report.errors.append(f"after restore: {e}")
         if rewrite:
             data_dsts = {clean(self.env.logical(r.path), self.env.os) for r in roots.values()}
             data_dsts.discard(clean(self.env.home_path, self.env.os))

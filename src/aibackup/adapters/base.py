@@ -16,7 +16,7 @@ CATEGORIES = ("data", "config", "checkpoint", "secret", "cache")
 DEFAULT_CATEGORIES = frozenset({"data", "config"})
 
 # Leftovers of our own restores must never end up in the next backup.
-_GLOBAL_RULES = (("*.aibackup-*.bak", "cache"), ("*.aibackup-tmp", "cache"))
+_GLOBAL_RULES = (("*.aibackup-*.bak", "cache"), ("*.aibackup-tmp", "cache"), ("*.aibackup-*/*", "cache"))
 
 
 @dataclass(frozen=True)
@@ -78,6 +78,9 @@ class Adapter:
     name: str = ""
     # (root name, glob on rel path) -> tables to empty in snapshots unless secrets are included
     scrub: dict[tuple[str, str], tuple[str, ...]] = {}
+    # (root name, glob on a directory's rel path): directories that are only consistent as a
+    # whole, such as LevelDB databases. An existing one is never mixed with archived files.
+    atomic_dirs: tuple[tuple[str, str], ...] = ()
 
     def roots(self, env: Env) -> list[Root]:
         raise NotImplementedError
@@ -87,6 +90,19 @@ class Adapter:
             if r == root and fnmatchcase(rel, pattern):
                 return tables
         return ()
+
+    def atomic_dir(self, root: str, rel: str) -> str | None:
+        """The atomic directory containing ``rel``, if any."""
+        parts = rel.split("/")
+        for r, pattern in self.atomic_dirs:
+            n = pattern.count("/") + 1
+            if r == root and len(parts) > n and fnmatchcase("/".join(parts[:n]), pattern):
+                return "/".join(parts[:n])
+        return None
+
+    def after_restore(self, sidelined: dict[Path, Path], dry_run: bool) -> list[str]:
+        """Called with existing atomic dirs -> where their archived copy went; returns notes."""
+        return [f"{live} exists; the archived copy was restored to {side}" for live, side in sidelined.items()]
 
     # Restore hooks; only called when the path mapping is not an identity.
 
@@ -212,6 +228,36 @@ def rewrite_json(data: bytes, keypaths: tuple[KeyPath, ...], mapper: PathMapper)
     if b"\n" in data.strip():
         return json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
     return _dumps(obj)
+
+
+_WIN_ABS = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def _map_any(obj, mapper: PathMapper):
+    """Map every string (and dict key) that is an absolute path of the source OS."""
+    if isinstance(obj, dict):
+        return {_map_any(k, mapper): _map_any(v, mapper) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_map_any(v, mapper) for v in obj]
+    if isinstance(obj, str) and "\n" not in obj:
+        absolute = _WIN_ABS.match(obj) if mapper.src_os == "windows" else obj.startswith("/")
+        if absolute:
+            return mapper.map(obj)
+    return obj
+
+
+def rewrite_json_paths(data: bytes, mapper: PathMapper) -> bytes | None:
+    """For JSON files with many, version-dependent path fields: map all absolute paths."""
+    try:
+        obj = json.loads(data)
+    except ValueError:
+        return None
+    new = _map_any(obj, mapper)
+    if new == obj:
+        return None
+    if b"\n" in data.strip():
+        return json.dumps(new, ensure_ascii=False, indent=2).encode("utf-8")
+    return _dumps(new)
 
 
 def merge_jsonl(existing: bytes, incoming: bytes, sort_key: str | None = None) -> bytes:

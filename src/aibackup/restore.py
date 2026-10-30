@@ -235,13 +235,16 @@ class Restorer:
     def _restore_stream(self, adapter, agent_id, entry, root, rel, target, mapper, rewrite, report) -> str:
         sqlite = entry["kind"] == "sqlite"
         exists = target.exists()
+        merge = sqlite and exists and not self.overwrite and adapter.merges_sqlite(root, rel)
         if exists and not rewrite:
             if target.stat().st_size == entry["size"] and _sha_file(target) == entry["sha256"]:
                 return "unchanged"
-            if not self.overwrite:
+            if not self.overwrite and not merge:
                 return "conflict"
         if self.dry_run:
             # Whether a rewritten database equals the target is only known after rewriting.
+            if merge:
+                return "merged"
             return ("overwritten" if self.overwrite else "conflict") if exists else "created"
         tmp = self._tmp(target)
         try:
@@ -264,6 +267,11 @@ class Restorer:
             if rewrite and _sha_file(tmp) == _sha_file(target):
                 tmp.unlink()
                 return "unchanged"
+            if merge:
+                try:
+                    return "merged" if adapter.merge_sqlite(root, rel, target, tmp) else "unchanged"
+                finally:
+                    tmp.unlink(missing_ok=True)
             if not self.overwrite:
                 tmp.unlink()
                 return "conflict"

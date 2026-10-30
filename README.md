@@ -31,7 +31,7 @@ aibackup verify sessions.zip
 aibackup inspect sessions.zip --files
 aibackup restore sessions.zip --dry-run
 aibackup restore sessions.zip
-aibackup desktop-index                     # rebuild Claude Desktop's session list
+aibackup desktop-index                     # rebuild Claude/OpenCode Desktop's session lists
 ```
 
 ### What is backed up?
@@ -118,9 +118,19 @@ claude.ai does not sync that. These databases are only restored as a whole: if o
 already exists on the target, the archived copy is put next to it (`*.aibackup-<time>`)
 and the sidebar groups are merged into the existing database. Quit Claude Desktop first.
 
-For archives without Desktop's session list (created before this version),
-`aibackup desktop-index` rebuilds it from the transcripts in `~/.claude/projects`
-(quit Claude Desktop first; `--dry-run` shows what would happen).
+### OpenCode Desktop
+
+OpenCode Desktop only lists the projects it remembers in its UI state
+(`ai.opencode.desktop/drafts.sqlite`), even though the sessions themselves live in
+`opencode.db`. That file is backed up; if it already exists on the target, the remembered
+projects are merged into it. Quit OpenCode Desktop first.
+
+### Archives without the desktop apps' lists
+
+For archives created before this version, `aibackup desktop-index` rebuilds Claude
+Desktop's session list from the transcripts in `~/.claude/projects` and adds every
+OpenCode project with sessions to OpenCode Desktop's sidebar (quit the apps first;
+`--dry-run` shows what would happen, `-a` limits it to one app).
 
 ### Conflicts
 

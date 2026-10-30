@@ -81,6 +81,9 @@ class Adapter:
     # (root name, glob on a directory's rel path): directories that are only consistent as a
     # whole, such as LevelDB databases. An existing one is never mixed with archived files.
     atomic_dirs: tuple[tuple[str, str], ...] = ()
+    # (root name, glob on rel path): SQLite files that ``merge_sqlite`` can merge into an
+    # existing database instead of reporting a conflict.
+    sqlite_merges: tuple[tuple[str, str], ...] = ()
 
     def roots(self, env: Env) -> list[Root]:
         raise NotImplementedError
@@ -99,6 +102,16 @@ class Adapter:
             if r == root and len(parts) > n and fnmatchcase("/".join(parts[:n]), pattern):
                 return "/".join(parts[:n])
         return None
+
+    def merges_sqlite(self, root: str, rel: str) -> bool:
+        return any(r == root and fnmatchcase(rel, pattern) for r, pattern in self.sqlite_merges)
+
+    def merge_sqlite(self, root: str, rel: str, live: Path, archived: Path) -> int:
+        """Merge ``archived`` into the existing ``live`` database; returns the number of changes.
+
+        Raises ``ValueError`` if merging is not possible right now (e.g. the app is running).
+        """
+        raise NotImplementedError
 
     def after_restore(self, sidelined: dict[Path, Path], dry_run: bool) -> list[str]:
         """Called with existing atomic dirs -> where their archived copy went; returns notes."""
@@ -244,6 +257,16 @@ def _map_any(obj, mapper: PathMapper):
         if absolute:
             return mapper.map(obj)
     return obj
+
+
+def map_json_paths(text: str, mapper: PathMapper) -> str:
+    """Like :func:`rewrite_json_paths` for a JSON string; non-JSON text is returned as is."""
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return text
+    new = _map_any(obj, mapper)
+    return text if new == obj else json.dumps(new, ensure_ascii=False, separators=(",", ":"))
 
 
 def rewrite_json_paths(data: bytes, mapper: PathMapper) -> bytes | None:

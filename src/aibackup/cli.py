@@ -224,21 +224,65 @@ def cmd_restore(args, log: Log) -> int:
     return 1 if failed else 0
 
 
+DESKTOP_APPS = ("claude-code", "opencode")
+
+
 def cmd_desktop_index(args, log: Log) -> int:
+    env = _env(args)
+    requested = _csv(args.agent) or list(DESKTOP_APPS)
+    unknown = [a for a in requested if a not in DESKTOP_APPS]
+    if unknown:
+        raise SystemExit(f"error: desktop-index supports {', '.join(DESKTOP_APPS)}, not {', '.join(unknown)}")
+    explicit = bool(args.agent)
+    verb = "would be added" if args.dry_run else "added"
+    failed = False
+    for agent in requested:
+        try:
+            if agent == "claude-code":
+                _index_claude_desktop(env, args, log, verb)
+            else:
+                _index_opencode_desktop(env, args, log, verb)
+        except ValueError as e:
+            # Without -a, a desktop app that isn't installed is not an error.
+            if explicit or "running" in str(e):
+                log.warn(f"{agent}: {e}")
+                failed = True
+            else:
+                log.info(f"{agent}: skipped ({e})")
+    return 1 if failed else 0
+
+
+def _report_skipped(missing: dict[str, int], what: str, log: Log) -> None:
+    if missing:
+        log.info(f"  skipped {sum(missing.values())} {what} whose project folder does not exist:")
+        for path, n in sorted(missing.items()):
+            log.info(f"    {n:>3}  {path}")
+
+
+def _index_claude_desktop(env, args, log: Log, verb: str) -> None:
     from aibackup.desktop_index import rebuild
 
-    result = rebuild(_env(args), dry_run=args.dry_run, org=args.org)
-    verb = "would be added" if args.dry_run else "added"
+    result = rebuild(env, dry_run=args.dry_run, org=args.org)
     for cwd, title in result.created:
         log.debug(f"  {cwd}: {title}")
-    log.info(f"{len(result.created)} session(s) {verb} to {result.storage}; {result.existing} already listed")
-    if result.missing:
-        log.info(f"Skipped {sum(result.missing.values())} session(s) whose project folder does not exist:")
-        for cwd, n in sorted(result.missing.items()):
-            log.info(f"  {n:>3}  {cwd}")
+    log.info(
+        f"claude-code: {len(result.created)} session(s) {verb} to {result.storage}; {result.existing} already listed"
+    )
+    _report_skipped(result.missing, "session(s)", log)
     if result.created and not args.dry_run:
-        log.info("Start Claude Desktop to see them.")
-    return 0
+        log.info("  Start Claude Desktop to see them.")
+
+
+def _index_opencode_desktop(env, args, log: Log, verb: str) -> None:
+    from aibackup.adapters.opencode import rebuild_project_list
+
+    result = rebuild_project_list(env, dry_run=args.dry_run)
+    for worktree in result.added:
+        log.debug(f"  {worktree}")
+    log.info(f"opencode: {len(result.added)} project(s) {verb} to {result.storage}; {result.listed} already listed")
+    _report_skipped(result.missing, "session(s) of project(s)", log)
+    if result.added and not args.dry_run:
+        log.info("  Start OpenCode Desktop to see them.")
 
 
 def _report_missing(missing: dict[str, tuple[str, set[str], set[str]]], log: Log, limit: int = 15) -> None:
@@ -321,10 +365,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "desktop-index",
-        help="rebuild Claude Desktop's list of Code sessions from Claude Code transcripts",
-        description="Adds every Claude Code session whose project folder exists to Claude Desktop's "
-        "session list, for restores of archives without it. Quit Claude Desktop first.",
+        help="rebuild the session/project lists of Claude Desktop and OpenCode Desktop",
+        description="For restores of archives without the desktop apps' own lists: adds every Claude Code "
+        "session to Claude Desktop's session list and every OpenCode project with sessions to OpenCode "
+        "Desktop's sidebar, if the project folder exists. Quit the apps first.",
     )
+    p.add_argument("-a", "--agent", action="append", help=f"desktop apps (default: all): {', '.join(DESKTOP_APPS)}")
     p.add_argument("-n", "--dry-run", action="store_true", help="only report what would happen")
     p.add_argument("--org", help="organization id, if Desktop knows several")
     target_options(p)

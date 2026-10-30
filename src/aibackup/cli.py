@@ -224,6 +224,23 @@ def cmd_restore(args, log: Log) -> int:
     return 1 if failed else 0
 
 
+def cmd_desktop_index(args, log: Log) -> int:
+    from aibackup.desktop_index import rebuild
+
+    result = rebuild(_env(args), dry_run=args.dry_run, org=args.org)
+    verb = "would be added" if args.dry_run else "added"
+    for cwd, title in result.created:
+        log.debug(f"  {cwd}: {title}")
+    log.info(f"{len(result.created)} session(s) {verb} to {result.storage}; {result.existing} already listed")
+    if result.missing:
+        log.info(f"Skipped {sum(result.missing.values())} session(s) whose project folder does not exist:")
+        for cwd, n in sorted(result.missing.items()):
+            log.info(f"  {n:>3}  {cwd}")
+    if result.created and not args.dry_run:
+        log.info("Start Claude Desktop to see them.")
+    return 0
+
+
 def _report_missing(missing: dict[str, tuple[str, set[str], set[str]]], log: Log, limit: int = 15) -> None:
     log.warn(
         f"sessions refer to {len(missing)} project folder(s) that do not exist on this system; "
@@ -301,6 +318,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     target_options(p)
     p.set_defaults(func=cmd_restore)
+
+    p = sub.add_parser(
+        "desktop-index",
+        help="rebuild Claude Desktop's list of Code sessions from Claude Code transcripts",
+        description="Adds every Claude Code session whose project folder exists to Claude Desktop's "
+        "session list, for restores of archives without it. Quit Claude Desktop first.",
+    )
+    p.add_argument("-n", "--dry-run", action="store_true", help="only report what would happen")
+    p.add_argument("--org", help="organization id, if Desktop knows several")
+    target_options(p)
+    p.set_defaults(func=cmd_desktop_index)
     return parser
 
 

@@ -31,6 +31,7 @@ aibackup verify sessions.zip
 aibackup inspect sessions.zip --files
 aibackup restore sessions.zip --dry-run
 aibackup restore sessions.zip
+aibackup desktop-index                     # rebuild Claude Desktop's session list
 ```
 
 ### What is backed up?
@@ -116,6 +117,10 @@ are backed up. The latter records which local session belongs to which sidebar g
 claude.ai does not sync that. These databases are only restored as a whole: if one
 already exists on the target, the archived copy is put next to it (`*.aibackup-<time>`)
 and the sidebar groups are merged into the existing database. Quit Claude Desktop first.
+
+For archives without Desktop's session list (created before this version),
+`aibackup desktop-index` rebuilds it from the transcripts in `~/.claude/projects`
+(quit Claude Desktop first; `--dry-run` shows what would happen).
 
 ### Conflicts
 

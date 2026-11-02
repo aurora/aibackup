@@ -183,7 +183,7 @@ message contents (tool calls, outputs) stay unchanged; they are history.
 | `command-code` | directory names under `projects/` (slug based on the mapped path), `cwd` in the session header line; in the desktop app's `app-state.json` project paths, chat `projectPath`/`worktreePath`, expanded/removed projects and trusted roots |
 | `codex` | `cwd` in rollouts; `threads.cwd`, `threads.rollout_path`, `local_thread_catalog.cwd`, `automation_runs.source_cwd` |
 | `opencode` | `project.worktree`, `session.directory`, `project_directory.directory`, `workspace.directory`; `directory`/`worktree` in `storage/`; every absolute path in the JSON values of Desktop's `drafts.sqlite` `state` table |
-| `zed` | `threads.folder_paths` (not: zstd-compressed `data` blobs) |
+| `zed` | `threads.folder_paths` (not: zstd-compressed `data` blobs); `sidebar_threads.folder_paths`/`main_worktree_paths` in the workspace database when the archive includes it (category `cache`) |
 | `zoo`, `roo` | `workspace` in `history_item.json`/`_index.json`; `worktree` in the checkpoint Git config |
 
 Deliberately not rewritten: Codex `config.toml`.
@@ -223,6 +223,11 @@ binaries.
   existing database by appending a write batch to its log (`chromium_leveldb.py`,
   standard library only). This requires Claude Desktop to be quit; it is checked via
   the database lock.
+- Zed's agent sidebar lists threads from `sidebar_threads` in the workspace database,
+  which Zed backfilled from `threads.db` only once. `desktop-index -a zed` adds rows for
+  top-level threads missing there and replaces paths of rows that point to
+  non-existent folders with the (already mapped) paths from `threads.db`. The
+  workspace database stays in the `cache` category (it is mostly editor state).
 - The Command Code desktop app lists projects and chats from `app-state.json`. If it
   exists on the target, missing projects, chats and trusted roots are merged into it
   (entries the user removed or deleted stay out). Trusted roots are only taken from
@@ -249,7 +254,7 @@ aibackup backup  [-a AGENTS] [-o FILE|-] [--include checkpoint,secret,cache|all]
 aibackup inspect FILE [--files]
 aibackup verify  FILE
 aibackup restore FILE [-a AGENTS] [--map-path FROM=TO]… [--dry-run] [--overwrite] [--allow-missing] [--checksum]
-aibackup desktop-index [-a claude-code,opencode,command-code] [--dry-run] [--org ORG]
+aibackup desktop-index [-a claude-code,opencode,command-code,zed] [--dry-run] [--org ORG]
 ```
 
 Backup and restore show a progress line when stderr is a terminal.

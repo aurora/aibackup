@@ -231,7 +231,7 @@ def cmd_restore(args, log: Log) -> int:
     return 1 if failed else 0
 
 
-DESKTOP_APPS = ("claude-code", "opencode", "command-code")
+DESKTOP_APPS = ("claude-code", "opencode", "command-code", "zed")
 
 
 def cmd_desktop_index(args, log: Log) -> int:
@@ -247,6 +247,8 @@ def cmd_desktop_index(args, log: Log) -> int:
         try:
             if agent == "claude-code":
                 _index_claude_desktop(env, args, log, verb)
+            elif agent == "zed":
+                _index_zed_sidebar(env, args, log, verb)
             else:
                 _index_project_list(agent, env, args, log, verb)
         except ValueError as e:
@@ -278,6 +280,22 @@ def _index_claude_desktop(env, args, log: Log, verb: str) -> None:
     _report_skipped(result.missing, "session(s)", log)
     if result.created and not args.dry_run:
         log.info("  Start Claude Desktop to see them.")
+
+
+def _index_zed_sidebar(env, args, log: Log, verb: str) -> None:
+    from aibackup.adapters.zed import rebuild_sidebar
+
+    result = rebuild_sidebar(env, dry_run=args.dry_run)
+    fixed = "would get" if args.dry_run else "got"
+    for title in result.added:
+        log.debug(f"  + {title}")
+    for title in result.fixed:
+        log.debug(f"  ~ {title}")
+    log.info(
+        f"zed: {len(result.added)} thread(s) {verb} to the agent sidebar, {len(result.fixed)} {fixed} "
+        f"their project paths fixed; {result.listed} already listed"
+    )
+    _report_skipped(result.missing, "thread(s)", log)
 
 
 def _index_project_list(agent: str, env, args, log: Log, verb: str) -> None:
@@ -385,10 +403,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "desktop-index",
-        help="rebuild the session/project lists of Claude Desktop, OpenCode Desktop and Command Code",
+        help="rebuild the session/project lists of Claude Desktop, OpenCode Desktop, Command Code and Zed",
         description="For restores of archives without the desktop apps' own lists: adds every Claude Code "
         "session to Claude Desktop's session list and every OpenCode / Command Code project with sessions "
-        "to the app's sidebar, if the project folder exists. Quit the apps first.",
+        "to the app's sidebar, and every Zed agent thread to Zed's agent sidebar, if the project folder "
+        "exists. Quit the apps first.",
     )
     p.add_argument("-a", "--agent", action="append", help=f"desktop apps (default: all): {', '.join(DESKTOP_APPS)}")
     p.add_argument("-n", "--dry-run", action="store_true", help="only report what would happen")

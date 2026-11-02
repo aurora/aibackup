@@ -133,6 +133,14 @@ backed up; if it already exists on the target, missing projects, chats and trust
 are merged into it. A project's chats appear once the project is opened in the app. Quit
 the app first: a running app rewrites the file on exit, so restore refuses to touch it.
 
+### Zed's agent sidebar
+
+Zed lists agent threads from its own table in the workspace database (`db/0-stable/db.sqlite`),
+not from `threads/threads.db`. It filled that table once from `threads.db`, so restored
+threads stay invisible, and entries copied from another OS keep paths that never match an
+open project. After restoring, quit Zed and run `aibackup desktop-index -a zed`: it adds the
+missing entries and takes the (already mapped) project paths from `threads.db`.
+
 ### Archives without the desktop apps' lists
 
 For archives created before this version, `aibackup desktop-index` rebuilds Claude

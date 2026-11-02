@@ -13,7 +13,7 @@ from aibackup.archive import CHUNK, ArchiveReader, safe_rel
 from aibackup.env import Env, join
 from aibackup.pathmap import PathMapper, clean
 from aibackup.progress import NullProgress, Progress
-from aibackup.sqlite_snapshot import SIDECAR_SUFFIXES
+from aibackup.sqlite_snapshot import SIDECAR_SUFFIXES, in_use
 
 # Files above this size are streamed and never rewritten or merged.
 LARGE_FILE = 256 << 20
@@ -45,7 +45,9 @@ def build_mapper(adapter: Adapter, env: Env, manifest: dict, explicit: list[tupl
     return mapper
 
 
-def find_missing(mapper: PathMapper, env: Env, skip_dsts: set[str]) -> dict[str, tuple[str, set[str]]]:
+def find_missing(
+    mapper: PathMapper, env: Env, skip_dsts: set[str], used: set | None = None
+) -> dict[str, tuple[str, set[str]]]:
     """Project folders that mapped paths point to but that don't exist on the target.
 
     Agents attach sessions to these paths, so sessions of a missing folder are
@@ -64,7 +66,7 @@ def find_missing(mapper: PathMapper, env: Env, skip_dsts: set[str]) -> dict[str,
         return any(exists(join(rule.dst, rest[:j] + (".git",), mapper.dst_os)) for j in range(1, len(rest)))
 
     missing: dict[str, tuple[str, set[str]]] = {}
-    for rule, rest in mapper.used:
+    for rule, rest in mapper.used if used is None else used:
         if rule.dst in skip_dsts:
             continue  # paths inside the agent's own data directories
         for k in range(len(rest) + 1):
@@ -109,11 +111,13 @@ class Restorer:
         log,
         checksum: bool = False,
         progress: Progress | None = None,
+        allow_missing: bool = False,
     ):
         self.reader = reader
         self.env = env
         self.dry_run = dry_run
         self.overwrite = overwrite
+        self.allow_missing = allow_missing
         self.checksum = checksum
         self.log = log
         self.progress = progress or NullProgress()
@@ -144,6 +148,9 @@ class Restorer:
         report.mapper = mapper
         rewrite = not mapper.is_identity
         roots = {r.name: r for r in adapter.roots(self.env)}
+        data_dsts = {clean(self.env.logical(r.path), self.env.os) for r in roots.values()}
+        data_dsts.discard(clean(self.env.home_path, self.env.os))
+        self._data_dsts = data_dsts
         # Caches hold platform-specific binaries (runtimes, language servers).
         skip_cache = self.reader.manifest["source"]["os"] != self.env.os
         # Atomic dir "root/rel" -> (existing dir, where the archived copy goes instead) or None.
@@ -198,15 +205,39 @@ class Restorer:
             except Exception as e:  # noqa: BLE001
                 report.errors.append(f"after restore: {e}")
         if rewrite:
-            data_dsts = {clean(self.env.logical(r.path), self.env.os) for r in roots.values()}
-            data_dsts.discard(clean(self.env.home_path, self.env.os))
             report.missing = find_missing(mapper, self.env, data_dsts)
         return report
 
+    def _refuse_missing(self, trace: set, label: str, report: AgentReport) -> bool:
+        """Refuse to replace a file whose rewritten paths point to missing project folders.
+
+        Agents hide (OpenCode even archives) sessions of folders that don't exist, so
+        replacing working data with such a file looks like data loss.
+        """
+        if self.allow_missing or not trace:
+            return False
+        missing = find_missing(report.mapper, self.env, self._data_dsts, trace)
+        if not missing:
+            return False
+        shown = ", ".join(sorted(missing)[:3]) + (", ..." if len(missing) > 3 else "")
+        report.errors.append(
+            f"{label}: not overwritten, it would point to {len(missing)} missing project folder(s) ({shown}); "
+            "map them with --map-path or pass --allow-missing"
+        )
+        return True
+
+    def _rewrite_traced(self, mapper: PathMapper, fn) -> tuple[object, set]:
+        mapper.trace = set()
+        try:
+            return fn(), mapper.trace
+        finally:
+            mapper.trace = None
+
     def _restore_small(self, adapter, agent_id, entry, root, rel, target, mapper, rewrite, report) -> str:
         data = self.reader.read(agent_id, entry)
+        trace: set = set()
         if rewrite:
-            new = adapter.rewrite_file(root, rel, data, mapper)
+            new, trace = self._rewrite_traced(mapper, lambda: adapter.rewrite_file(root, rel, data, mapper))
             if new is not None:
                 data = new
                 report.rewritten += 1
@@ -216,6 +247,8 @@ class Restorer:
             if existing == data:
                 return "unchanged"
             if self.overwrite:
+                if self._refuse_missing(trace, f"{root}/{rel}", report):
+                    return "refused"
                 status = "overwritten"
             else:
                 merged = adapter.merge(root, rel, existing, data)
@@ -241,18 +274,28 @@ class Restorer:
                 return "unchanged"
             if not self.overwrite and not merge:
                 return "conflict"
+        if exists and sqlite and in_use(target):
+            # Replacing it under a running agent (or its server) loses whatever it writes next.
+            report.errors.append(
+                f"{root}/{rel}: in use by another program; quit {adapter.name} (and any server it started) first"
+            )
+            return "refused"
         if self.dry_run:
             # Whether a rewritten database equals the target is only known after rewriting.
             if merge:
                 return "merged"
             return ("overwritten" if self.overwrite else "conflict") if exists else "created"
         tmp = self._tmp(target)
+        trace: set = set()
         try:
             self.reader.extract_to(agent_id, entry, tmp, self._on_chunk)
             if sqlite and rewrite:
                 conn = sqlite3.connect(tmp)
                 try:
-                    if adapter.rewrite_sqlite(root, rel, conn, mapper):
+                    changed, trace = self._rewrite_traced(
+                        mapper, lambda: adapter.rewrite_sqlite(root, rel, conn, mapper)
+                    )
+                    if changed:
                         report.rewritten += 1
                     conn.commit()
                 finally:
@@ -275,6 +318,9 @@ class Restorer:
             if not self.overwrite:
                 tmp.unlink()
                 return "conflict"
+            if self._refuse_missing(trace, f"{root}/{rel}", report):
+                tmp.unlink()
+                return "refused"
             status = "overwritten"
             if sqlite and target.with_name(target.name + "-wal").exists():
                 self.log.warn(f"{target} has a WAL file; make sure {adapter.name} is closed")

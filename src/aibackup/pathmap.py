@@ -50,6 +50,8 @@ class PathMapper:
         self.rules: list[Rule] = []
         # Every non-identity mapping that was applied, as (rule, remaining components).
         self.used: set[tuple[Rule, tuple[str, ...]]] = set()
+        # When set, mappings are also collected here (to see what a single file refers to).
+        self.trace: set[tuple[Rule, tuple[str, ...]]] | None = None
         for src, dst in rules:
             self.add(src, dst)
 
@@ -87,6 +89,8 @@ class PathMapper:
             return path
         rule, rest = found
         self.used.add((rule, tuple(rest)))
+        if self.trace is not None:
+            self.trace.add((rule, tuple(rest)))
         return join(rule.dst, rest, self.dst_os)
 
 

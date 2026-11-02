@@ -187,7 +187,14 @@ def cmd_restore(args, log: Log) -> int:
     src = manifest["source"]
     log.info(f"Restoring from {src['os']} ({src['home']}) to {env.os} ({env.home_path})" + (" [dry run]" if args.dry_run else ""))
     restorer = Restorer(
-        reader, env, dry_run=args.dry_run, overwrite=args.overwrite, checksum=args.checksum, log=log, progress=log.progress
+        reader,
+        env,
+        dry_run=args.dry_run,
+        overwrite=args.overwrite,
+        checksum=args.checksum,
+        log=log,
+        progress=log.progress,
+        allow_missing=args.allow_missing,
     )
     started = time.monotonic()
     log.progress.begin(sum(f["size"] for a in agents for f in reader.files(a)))
@@ -355,6 +362,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--map-path", action="append", metavar="FROM=TO", help="rewrite project paths with prefix FROM to TO")
     p.add_argument("-n", "--dry-run", action="store_true", help="only report what would happen")
     p.add_argument("--overwrite", action="store_true", help="replace differing files (originals are kept as *.bak)")
+    p.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="with --overwrite, also replace files whose project paths don't exist on this system",
+    )
     p.add_argument(
         "--checksum",
         action="store_true",

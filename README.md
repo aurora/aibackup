@@ -140,7 +140,11 @@ OpenCode project with sessions to OpenCode Desktop's sidebar (quit the apps firs
 - Other differing files are left untouched and reported as conflicts.
   `--overwrite` replaces them; the original is kept as `*.aibackup-<time>.bak`.
 - Databases cannot be merged: if an agent has already been used on the target system,
-  `--overwrite` replaces its database. Close the agent first.
+  `--overwrite` replaces its database. Close the agent first, including servers it
+  started in the background; databases that are still open are not replaced.
+- `--overwrite` does not replace a file whose project paths would point to folders that
+  don't exist on this system (agents hide such sessions; OpenCode even archives the
+  projects). Fix the mapping with `--map-path`, or pass `--allow-missing`.
 
 ## Development
 

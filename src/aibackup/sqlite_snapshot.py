@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import sqlite3
 import tempfile
@@ -38,6 +39,48 @@ def _backup(src: sqlite3.Connection, dst: Path) -> None:
         out.execute("PRAGMA journal_mode=DELETE")
     finally:
         out.close()
+
+
+# Byte ranges SQLite locks (see os_unix.c / os_win.c): connections in WAL mode hold a
+# shared lock on the -shm "DMS" byte as long as they are open; readers and writers of
+# rollback-journal databases lock the SHARED range while they access the file.
+_SHARED_FIRST, _SHARED_SIZE = 0x40000002, 510
+_SHM_DMS = 128
+
+
+def _locked(path: Path, start: int, length: int) -> bool:
+    try:
+        fd = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0))
+    except OSError:
+        return False
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, start, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, length)
+            os.lseek(fd, start, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, length)
+        else:
+            import fcntl
+
+            fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB, length, start)
+            fcntl.lockf(fd, fcntl.LOCK_UN, length, start)
+    except OSError:
+        return True
+    finally:
+        os.close(fd)
+    return False
+
+
+def in_use(path: Path) -> bool:
+    """Whether another process has the database open (reliable for WAL databases).
+
+    Only probes locks, so the database is never opened or modified. An idle
+    connection to a rollback-journal database holds no lock and goes unnoticed.
+    """
+    shm = path.with_name(path.name + "-shm")
+    return _locked(path, _SHARED_FIRST, _SHARED_SIZE) or _locked(shm, _SHM_DMS, 1)
 
 
 def table_exists(conn: sqlite3.Connection, table: str) -> bool:

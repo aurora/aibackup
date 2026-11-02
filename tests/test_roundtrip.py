@@ -1,6 +1,8 @@
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -147,10 +149,18 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(manifest["errors"], [])
         return manifest
 
-    def restore(self, env, *, maps=(), overwrite=False, dry_run=False, checksum=False):
+    def restore(self, env, *, maps=(), overwrite=False, dry_run=False, checksum=False, allow_missing=False):
         reader = ArchiveReader(self.archive)
         try:
-            restorer = Restorer(reader, env, dry_run=dry_run, overwrite=overwrite, checksum=checksum, log=QuietLog())
+            restorer = Restorer(
+                reader,
+                env,
+                dry_run=dry_run,
+                overwrite=overwrite,
+                checksum=checksum,
+                log=QuietLog(),
+                allow_missing=allow_missing,
+            )
             return {a: restorer.restore_agent(a, list(maps)) for a in reader.manifest["agents"]}
         finally:
             reader.close()
@@ -445,6 +455,59 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(header["cwd"], "/home/user/code/MyProject")
         self.assertEqual(message["content"][0]["input"]["cwd"], proj)
         self.assertTrue(restored.with_name("s1.meta.json").exists())
+
+    def test_overwrite_refuses_databases_in_use(self):
+        self.backup()
+        target = self.tmp / "win2"
+        env = Env("windows", target, WIN_HOME, {})
+        db = target / ".codex/state_5.sqlite"
+        db.parent.mkdir(parents=True)
+        conn = sqlite3.connect(db)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE threads (id TEXT)")
+        conn.commit()
+        conn.close()
+        # File locks are per process, so the running agent has to be another process.
+        script = (
+            f"import sqlite3,sys; c=sqlite3.connect({str(db)!r}); c.execute('SELECT 1').fetchall(); "
+            "print(1, flush=True); sys.stdin.read()"
+        )
+        pipes = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "text": True}
+        agent = subprocess.Popen([sys.executable, "-c", script], **pipes)
+        try:
+            agent.stdout.readline()
+            report = self.restore(env, overwrite=True)["codex"]
+        finally:
+            agent.communicate("")
+        self.assertEqual(report.counts["refused"], 1)
+        self.assertIn("in use", report.errors[0])
+        self.assertEqual(query(db, "SELECT count(*) FROM threads"), [(0,)])
+
+        report = self.restore(env, overwrite=True)["codex"]
+        self.assertEqual(report.errors, [])
+        self.assertEqual(query(db, "SELECT id FROM threads"), [("1",)])
+
+    def test_overwrite_refuses_files_pointing_to_missing_folders(self):
+        self.backup()
+        lin = self.tmp / "lin"
+        env = Env("linux", lin, "/home/h", {})
+        (lin / "code/proj").mkdir(parents=True)
+        good = [(WIN_HOME + "\\source", "/home/h/code")]
+        self.restore(env, maps=good)
+        db = lin / ".local/share/opencode/opencode.db"
+        os.utime(db)  # the agent has used it since
+        session = lin / ".claude/projects/-home-h-source-proj/s1.jsonl"
+        write(session, jsonl({"type": "user", "cwd": "/home/h/elsewhere"}))
+
+        # Without --map-path the archive points to /home/h/source/proj, which doesn't exist.
+        reports = self.restore(env, overwrite=True)
+        self.assertEqual(reports["opencode"].counts["refused"], 1)
+        self.assertEqual(query(db, "SELECT directory FROM session"), [("/home/h/code/proj",)])
+        self.assertEqual(reports["claude-code"].counts["refused"], 1)
+        self.assertIn("elsewhere", session.read_text(encoding="utf-8"))
+
+        self.restore(env, overwrite=True, allow_missing=True)
+        self.assertEqual(query(db, "SELECT directory FROM session"), [("/home/h/source/proj",)])
 
     def test_overwrite_sqlite_moves_stale_wal_away(self):
         self.backup()

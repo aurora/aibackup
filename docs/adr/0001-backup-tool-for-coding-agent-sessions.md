@@ -208,6 +208,12 @@ binaries.
   `<name>.aibackup-<timestamp>.bak`, for SQLite including `-wal`/`-shm`.
 - Files are replaced atomically (`os.replace`) and mtimes are restored (agents sort
   sessions by them).
+- `--overwrite` refuses to replace a SQLite database another process has open (probed
+  via SQLite's file locks, without opening it): a running agent or its background
+  server would keep writing to the moved-away file. It also refuses to replace a file
+  whose rewritten paths point to project folders that don't exist on the target,
+  unless `--allow-missing` is given; agents hide such sessions and OpenCode archives
+  the projects, which looks like data loss.
 - Archive paths are validated (no `..`, no absolute paths).
 - Directories that are only consistent as a whole (LevelDB databases: Claude Desktop's
   `Local Storage`, `IndexedDB`) are never mixed with archived files. If one exists, the
@@ -237,7 +243,7 @@ aibackup list    [-a AGENTS] [--no-size]
 aibackup backup  [-a AGENTS] [-o FILE|-] [--include checkpoint,secret,cache|all] [--exclude …] [--compression fast|best|none]
 aibackup inspect FILE [--files]
 aibackup verify  FILE
-aibackup restore FILE [-a AGENTS] [--map-path FROM=TO]… [--dry-run] [--overwrite] [--checksum]
+aibackup restore FILE [-a AGENTS] [--map-path FROM=TO]… [--dry-run] [--overwrite] [--allow-missing] [--checksum]
 aibackup desktop-index [-a claude-code,opencode] [--dry-run] [--org ORG]
 ```
 

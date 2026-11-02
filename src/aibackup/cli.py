@@ -231,7 +231,7 @@ def cmd_restore(args, log: Log) -> int:
     return 1 if failed else 0
 
 
-DESKTOP_APPS = ("claude-code", "opencode")
+DESKTOP_APPS = ("claude-code", "opencode", "command-code")
 
 
 def cmd_desktop_index(args, log: Log) -> int:
@@ -248,7 +248,7 @@ def cmd_desktop_index(args, log: Log) -> int:
             if agent == "claude-code":
                 _index_claude_desktop(env, args, log, verb)
             else:
-                _index_opencode_desktop(env, args, log, verb)
+                _index_project_list(agent, env, args, log, verb)
         except ValueError as e:
             # Without -a, a desktop app that isn't installed is not an error.
             if explicit or "running" in str(e):
@@ -280,16 +280,24 @@ def _index_claude_desktop(env, args, log: Log, verb: str) -> None:
         log.info("  Start Claude Desktop to see them.")
 
 
-def _index_opencode_desktop(env, args, log: Log, verb: str) -> None:
-    from aibackup.adapters.opencode import rebuild_project_list
+def _index_project_list(agent: str, env, args, log: Log, verb: str) -> None:
+    if agent == "opencode":
+        from aibackup.adapters.opencode import rebuild_project_list
 
+        app = "OpenCode Desktop"
+    else:
+        from aibackup.adapters.command_code import rebuild_project_list
+
+        app = "Command Code"
     result = rebuild_project_list(env, dry_run=args.dry_run)
-    for worktree in result.added:
-        log.debug(f"  {worktree}")
-    log.info(f"opencode: {len(result.added)} project(s) {verb} to {result.storage}; {result.listed} already listed")
+    for path in result.added:
+        log.debug(f"  {path}")
+    log.info(f"{agent}: {len(result.added)} project(s) {verb} to {result.storage}; {result.listed} already listed")
     _report_skipped(result.missing, "session(s) of project(s)", log)
     if result.added and not args.dry_run:
-        log.info("  Start OpenCode Desktop to see them.")
+        log.info(f"  Start {app} to see them.")
+        if agent == "command-code":
+            log.info("  Open each project once (and confirm trusting its folder) to load its chats.")
 
 
 def _report_missing(missing: dict[str, tuple[str, set[str], set[str]]], log: Log, limit: int = 15) -> None:
@@ -377,10 +385,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "desktop-index",
-        help="rebuild the session/project lists of Claude Desktop and OpenCode Desktop",
+        help="rebuild the session/project lists of Claude Desktop, OpenCode Desktop and Command Code",
         description="For restores of archives without the desktop apps' own lists: adds every Claude Code "
-        "session to Claude Desktop's session list and every OpenCode project with sessions to OpenCode "
-        "Desktop's sidebar, if the project folder exists. Quit the apps first.",
+        "session to Claude Desktop's session list and every OpenCode / Command Code project with sessions "
+        "to the app's sidebar, if the project folder exists. Quit the apps first.",
     )
     p.add_argument("-a", "--agent", action="append", help=f"desktop apps (default: all): {', '.join(DESKTOP_APPS)}")
     p.add_argument("-n", "--dry-run", action="store_true", help="only report what would happen")

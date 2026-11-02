@@ -31,7 +31,7 @@ aibackup verify sessions.zip
 aibackup inspect sessions.zip --files
 aibackup restore sessions.zip --dry-run
 aibackup restore sessions.zip
-aibackup desktop-index                     # rebuild Claude/OpenCode Desktop's session lists
+aibackup desktop-index                     # rebuild the desktop apps' session/project lists
 ```
 
 ### What is backed up?
@@ -125,12 +125,22 @@ OpenCode Desktop only lists the projects it remembers in its UI state
 `opencode.db`. That file is backed up; if it already exists on the target, the remembered
 projects are merged into it. Quit OpenCode Desktop first.
 
+### Command Code desktop app
+
+The desktop app lists projects, chats and trusted project folders in its state file
+(`Command Code/app-state.json`); the sessions live in `~/.commandcode`. The state file is
+backed up; if it already exists on the target, missing projects, chats and trusted folders
+are merged into it. A project's chats appear once the project is opened in the app. Quit
+the app first: a running app rewrites the file on exit, so restore refuses to touch it.
+
 ### Archives without the desktop apps' lists
 
 For archives created before this version, `aibackup desktop-index` rebuilds Claude
 Desktop's session list from the transcripts in `~/.claude/projects` and adds every
-OpenCode project with sessions to OpenCode Desktop's sidebar (quit the apps first;
-`--dry-run` shows what would happen, `-a` limits it to one app).
+OpenCode or Command Code project with sessions to the app's sidebar (quit the apps
+first; `--dry-run` shows what would happen, `-a` limits it to one app). Command Code
+folders added this way are not marked as trusted; the app asks when a project is
+first opened.
 
 ### Conflicts
 

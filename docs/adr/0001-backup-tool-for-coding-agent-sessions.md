@@ -113,7 +113,7 @@ serve to rewind within a session.
 |---|---|
 | `claude-code` | `~/.claude/` (or `$CLAUDE_CONFIG_DIR`), `~/.claude.json`; Claude Desktop's user data dir (Windows `%APPDATA%\Claude` or the Microsoft Store package dir, Linux `~/.config/Claude`, macOS `~/Library/Application Support/Claude`): `claude-code-sessions/`, `local-agent-mode-sessions/`, `Local Storage/`, `IndexedDB/` as `data`, `claude_desktop_config.json` as `secret`, everything else as `cache` |
 | `codex` | `~/.codex/` (or `$CODEX_HOME`) |
-| `command-code` | `~/.commandcode/`; when it runs in WSL, the WSL home is addressed via `--home`/`--platform linux`/`--home-path` |
+| `command-code` | `~/.commandcode/`; when it runs in WSL, the WSL home is addressed via `--home`/`--platform linux`/`--home-path`; desktop app user data dir `Command Code` (Linux `~/.config`; Windows `%APPDATA%` and macOS `~/Library/Application Support` assumed from Electron's defaults, unverified): `app-state.json` as `data`, everything else (including the rebuildable `thread-index.db`) as `cache` |
 | `opencode` | `$XDG_DATA_HOME/opencode`, `$XDG_CONFIG_HOME/opencode` (default `~/.local/share`, `~/.config`, on every OS); OpenCode Desktop's user data dir `ai.opencode.desktop` (Windows `%APPDATA%`, Linux `~/.config`, macOS `~/Library/Application Support`): `drafts.sqlite` and legacy `*.dat` as `data`, `opencode.settings` as `config`, everything else as `cache` |
 | `zed` | Windows `%LOCALAPPDATA%\Zed` + `%APPDATA%\Zed`; Linux `~/.local/share/zed` + `~/.config/zed`; macOS `~/Library/Application Support/Zed` + `~/.config/zed` |
 | `zoo`, `roo` | `globalStorage/<extension-id>` in VS Code, VS Code Insiders, VSCodium, Cursor, Windsurf |
@@ -180,7 +180,7 @@ message contents (tool calls, outputs) stay unchanged; they are history.
 | Adapter | Rewritten |
 |---|---|
 | `claude-code` | directory names under `projects/` (encoding based on the mapped path), top-level `cwd` in session JSONL, `project` in `history.jsonl`, project keys in `~/.claude.json` (trust); every absolute path in Desktop's session records (many version-dependent fields) |
-| `command-code` | directory names under `projects/` (slug based on the mapped path), `cwd` in the session header line |
+| `command-code` | directory names under `projects/` (slug based on the mapped path), `cwd` in the session header line; in the desktop app's `app-state.json` project paths, chat `projectPath`/`worktreePath`, expanded/removed projects and trusted roots |
 | `codex` | `cwd` in rollouts; `threads.cwd`, `threads.rollout_path`, `local_thread_catalog.cwd`, `automation_runs.source_cwd` |
 | `opencode` | `project.worktree`, `session.directory`, `project_directory.directory`, `workspace.directory`; `directory`/`worktree` in `storage/`; every absolute path in the JSON values of Desktop's `drafts.sqlite` `state` table |
 | `zed` | `threads.folder_paths` (not: zstd-compressed `data` blobs) |
@@ -223,6 +223,11 @@ binaries.
   existing database by appending a write batch to its log (`chromium_leveldb.py`,
   standard library only). This requires Claude Desktop to be quit; it is checked via
   the database lock.
+- The Command Code desktop app lists projects and chats from `app-state.json`. If it
+  exists on the target, missing projects, chats and trusted roots are merged into it
+  (entries the user removed or deleted stay out). Trusted roots are only taken from
+  the archive, never added by the tool. Files of a desktop app that is running are
+  not restored at all (`Adapter.busy`), because the app rewrites its state on exit.
 - OpenCode Desktop's sidebar only shows the projects listed in `usedProjectIDs` of
   its UI state (`drafts.sqlite`, table `state`). An adapter may declare SQLite files
   it can merge (`sqlite_merges`); for this one, missing state entries and listed
@@ -244,7 +249,7 @@ aibackup backup  [-a AGENTS] [-o FILE|-] [--include checkpoint,secret,cache|all]
 aibackup inspect FILE [--files]
 aibackup verify  FILE
 aibackup restore FILE [-a AGENTS] [--map-path FROM=TO]… [--dry-run] [--overwrite] [--allow-missing] [--checksum]
-aibackup desktop-index [-a claude-code,opencode] [--dry-run] [--org ORG]
+aibackup desktop-index [-a claude-code,opencode,command-code] [--dry-run] [--org ORG]
 ```
 
 Backup and restore show a progress line when stderr is a terminal.

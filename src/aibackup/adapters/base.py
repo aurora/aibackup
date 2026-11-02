@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -73,6 +74,20 @@ class Root:
         return self.default
 
 
+def electron_running(user_data: Path) -> bool:
+    """Whether an Electron app has its user data dir open (it rewrites its state files on exit)."""
+    if os.path.lexists(user_data / "SingletonLock"):
+        return True
+    lockfile = user_data / "lockfile"  # Windows
+    if lockfile.exists():
+        try:
+            with lockfile.open("ab"):
+                pass
+        except OSError:
+            return True
+    return False
+
+
 class Adapter:
     id: str = ""
     name: str = ""
@@ -101,6 +116,10 @@ class Adapter:
             n = pattern.count("/") + 1
             if r == root and len(parts) > n and fnmatchcase("/".join(parts[:n]), pattern):
                 return "/".join(parts[:n])
+        return None
+
+    def busy(self, root: Root) -> str | None:
+        """Why files in ``root`` must not be written right now (e.g. its app is running)."""
         return None
 
     def merges_sqlite(self, root: str, rel: str) -> bool:

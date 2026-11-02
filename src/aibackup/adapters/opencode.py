@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import time
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
 
-from aibackup.adapters.base import Adapter, Root, map_json_paths, rewrite_json, rewrite_json_paths, rules
+from aibackup.adapters.base import (
+    Adapter,
+    Root,
+    electron_running,
+    map_json_paths,
+    rewrite_json,
+    rewrite_json_paths,
+    rules,
+)
 from aibackup.env import Env
 from aibackup.pathmap import PathMapper
 from aibackup.sqlite_snapshot import rewrite_columns, table_exists
@@ -34,18 +41,7 @@ def desktop_dir(env: Env) -> Path:
     return env.user_config_dir() / "ai.opencode.desktop"
 
 
-def desktop_running(path: Path) -> bool:
-    """Whether OpenCode Desktop (an Electron app) has its user data dir open."""
-    if os.path.lexists(path / "SingletonLock"):
-        return True
-    lockfile = path / "lockfile"  # Windows
-    if lockfile.exists():
-        try:
-            with lockfile.open("ab"):
-                pass
-        except OSError:
-            return True
-    return False
+desktop_running = electron_running
 
 
 def _server_state(conn: sqlite3.Connection) -> dict | None:
@@ -223,6 +219,9 @@ class OpenCode(Adapter):
         if rel != "opencode.db":
             return 0
         return sum(rewrite_columns(conn, t, cols, mapper.map) for t, cols in _PATH_COLUMNS.items())
+
+    def busy(self, root: Root) -> str | None:
+        return "OpenCode Desktop is running" if root.name == "desktop" and electron_running(root.path) else None
 
     def merge_sqlite(self, root: str, rel: str, live: Path, archived: Path) -> int:
         if desktop_running(live.parent):

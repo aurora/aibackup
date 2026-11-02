@@ -155,6 +155,8 @@ class Restorer:
         skip_cache = self.reader.manifest["source"]["os"] != self.env.os
         # Atomic dir "root/rel" -> (existing dir, where the archived copy goes instead) or None.
         redirects: dict[str, tuple[Path, Path] | None] = {}
+        # Roots of running desktop apps: they rewrite their state on exit, undoing our changes.
+        busy = {name: reason for name, r in roots.items() if (reason := adapter.busy(r))}
 
         for entry in self.reader.files(agent_id):
             if skip_cache and entry["category"] == "cache":
@@ -183,6 +185,12 @@ class Restorer:
                     redirects[key] = (live, live.with_name(f"{live.name}.aibackup-{self.stamp}")) if live.exists() else None
                 if redirects[key] is not None:
                     target = redirects[key][1].joinpath(*rel[len(atomic) + 1 :].split("/"))
+            if root.name in busy and not self._quick_unchanged(target, entry, rewrite):
+                report.counts["refused"] += 1
+                if not any(e.startswith(f"{root.name}/:") for e in report.errors):
+                    report.errors.append(f"{root.name}/: {busy[root.name]}; quit it and restore again")
+                self.progress.advance(entry["size"])
+                continue
             try:
                 if self._quick_unchanged(target, entry, rewrite):
                     status = "unchanged"
